@@ -46,8 +46,6 @@ struct LiveGame {
     home_team: LiveTeam,
     #[serde(rename = "awayTeam")]
     away_team: LiveTeam,
-    #[serde(rename = "gameLeaders")]
-    game_leaders: Option<GameLeaders>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,22 +59,6 @@ struct LiveTeam {
     score: i32,
     wins: i32,
     losses: i32,
-}
-
-#[derive(Debug, Deserialize)]
-struct GameLeaders {
-    #[serde(rename = "homeLeaders")]
-    home_leaders: Option<PlayerLeader>,
-    #[serde(rename = "awayLeaders")]
-    away_leaders: Option<PlayerLeader>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PlayerLeader {
-    name: String,
-    points: f64,
-    rebounds: f64,
-    assists: f64,
 }
 
 // Schedule endpoint types — nullable string fields
@@ -145,8 +127,6 @@ struct Game {
     away_score: i32,
     away_wins: i32,
     away_losses: i32,
-    away_leader: Option<(String, i32, i32, i32)>,
-    home_leader: Option<(String, i32, i32, i32)>,
 }
 
 impl Game {
@@ -166,18 +146,6 @@ impl Game {
             away_score: g.away_team.score,
             away_wins: g.away_team.wins,
             away_losses: g.away_team.losses,
-            away_leader: g.game_leaders.as_ref().and_then(|gl| {
-                gl.away_leaders
-                    .as_ref()
-                    .filter(|l| !l.name.is_empty())
-                    .map(|l| (l.name.clone(), l.points as i32, l.rebounds as i32, l.assists as i32))
-            }),
-            home_leader: g.game_leaders.as_ref().and_then(|gl| {
-                gl.home_leaders
-                    .as_ref()
-                    .filter(|l| !l.name.is_empty())
-                    .map(|l| (l.name.clone(), l.points as i32, l.rebounds as i32, l.assists as i32))
-            }),
         }
     }
 
@@ -197,8 +165,6 @@ impl Game {
             away_score: g.away_team.score,
             away_wins: g.away_team.wins,
             away_losses: g.away_team.losses,
-            away_leader: None,
-            home_leader: None,
         }
     }
 }
@@ -371,7 +337,7 @@ fn render_card(game: &Game) -> Vec<String> {
     } else {
         game.game_status_text.clone()
     };
-    lines.push(card_line(&format!(" {status_text}"), 1 + status_text.len()));
+    lines.push(card_line(&format!(" {status_text}"), 1 + status_text.chars().count()));
 
     // Team lines
     for (tc, wins, losses, score, is_winner) in [
@@ -398,13 +364,6 @@ fn render_card(game: &Game) -> Vec<String> {
 
         let content = format!("  {tc}{rec}{}{score_str} ", " ".repeat(gap));
         lines.push(format!("\u{2502}{content}\u{2502}"));
-    }
-
-    // Leaders
-    for leader in [&game.away_leader, &game.home_leader].into_iter().flatten() {
-        let txt = format!("{} {} pts {} reb {} ast", leader.0, leader.1, leader.2, leader.3);
-        let vis = 3 + txt.len();
-        lines.push(card_line(&format!("   {txt}"), vis));
     }
 
     lines
