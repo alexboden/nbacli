@@ -1,8 +1,10 @@
-use std::time::Duration;
+use std::fs;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
 use chrono::{Days, Local, NaiveDate};
 use clap::Parser;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
@@ -74,14 +76,14 @@ struct LeagueSchedule {
     game_dates: Vec<ScheduleGameDate>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ScheduleGameDate {
     #[serde(rename = "gameDate")]
     game_date: String,
     games: Vec<ScheduleGame>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ScheduleGame {
     #[serde(rename = "gameStatus")]
     game_status: i32,
@@ -93,7 +95,7 @@ struct ScheduleGame {
     away_team: ScheduleTeam,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ScheduleTeam {
     #[serde(rename = "teamTricode")]
     team_tricode: Option<String>,
@@ -178,7 +180,54 @@ fn build_client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
+fn cache_path() -> Option<PathBuf> {
+    dirs::cache_dir().map(|d| d.join("nba-rs").join("schedule.json"))
+}
+
+fn read_cache(today: NaiveDate) -> Option<Vec<ScheduleGameDate>> {
+    let path = cache_path()?;
+    let meta = fs::metadata(&path).ok()?;
+    let age = SystemTime::now().duration_since(meta.modified().ok()?).ok()?;
+    if age > Duration::from_secs(7 * 24 * 60 * 60) {
+        return None;
+    }
+    let body = fs::read_to_string(&path).ok()?;
+    let dates: Vec<ScheduleGameDate> = serde_json::from_str(&body).ok()?;
+    // Ensure cache covers today
+    let covers_today = dates.iter().any(|gd| {
+        parse_schedule_date(&gd.game_date).is_some_and(|d| d >= today)
+    });
+    if covers_today { Some(dates) } else { None }
+}
+
+fn write_cache(dates: &[ScheduleGameDate]) {
+    if let Some(path) = cache_path() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string(dates) {
+            let _ = fs::write(&path, json);
+        }
+    }
+}
+
+fn filter_next_week(dates: &[ScheduleGameDate], today: NaiveDate) -> Vec<ScheduleGameDate> {
+    let end = today + Days::new(7);
+    dates.iter()
+        .filter(|gd| {
+            parse_schedule_date(&gd.game_date).is_some_and(|d| d >= today && d <= end)
+        })
+        .cloned()
+        .collect()
+}
+
 async fn fetch_schedule() -> Result<Vec<ScheduleGameDate>, String> {
+    let today = Local::now().date_naive();
+
+    if let Some(dates) = read_cache(today) {
+        return Ok(dates);
+    }
+
     let client = build_client()?;
     let resp = client
         .get("https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json")
@@ -194,6 +243,9 @@ async fn fetch_schedule() -> Result<Vec<ScheduleGameDate>, String> {
     let body = resp.text().await.map_err(|e| e.to_string())?;
     let data: ScheduleResponse =
         serde_json::from_str(&body).map_err(|e| format!("Parse error: {e}"))?;
+
+    let week = filter_next_week(&data.league_schedule.game_dates, today);
+    write_cache(&week);
 
     Ok(data.league_schedule.game_dates)
 }
