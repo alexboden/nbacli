@@ -392,9 +392,9 @@ fn render_card(game: &Game) -> Vec<String> {
     lines.push(card_line(&format!(" {status_text}"), 1 + status_text.chars().count()));
 
     // Team lines
-    for (tc, wins, losses, score, is_winner) in [
-        (away_tc, game.away_wins, game.away_losses, game.away_score, has_score && game.away_score > game.home_score),
-        (home_tc, game.home_wins, game.home_losses, game.home_score, has_score && game.home_score > game.away_score),
+    for (tc, wins, losses, score) in [
+        (away_tc, game.away_wins, game.away_losses, game.away_score),
+        (home_tc, game.home_wins, game.home_losses, game.home_score),
     ] {
         let rec = if wins > 0 || losses > 0 {
             format!(" ({wins}-{losses})")
@@ -403,8 +403,7 @@ fn render_card(game: &Game) -> Vec<String> {
         };
 
         let score_str = if has_score {
-            let marker = if is_winner { " *" } else { "  " };
-            format!("{score:>3}{marker}")
+            format!("{score:>3}  ")
         } else {
             String::new()
         };
