@@ -85,6 +85,8 @@ struct ScheduleGameDate {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct ScheduleGame {
+    #[serde(rename = "gameDateTimeUTC", default)]
+    game_date_time_utc: String,
     #[serde(rename = "gameStatus")]
     game_status: i32,
     #[serde(rename = "gameStatusText")]
@@ -111,6 +113,7 @@ struct ScheduleTeam {
 // ── Unified game type ────────────────────────────────────────────────────────
 
 struct Game {
+    sort_key: String,
     game_status: i32,
     game_status_text: String,
     home_tricode: String,
@@ -134,6 +137,7 @@ struct Game {
 impl Game {
     fn from_live(g: &LiveGame) -> Self {
         Self {
+            sort_key: String::new(),
             game_status: g.game_status,
             game_status_text: g.game_status_text.trim().to_string(),
             home_tricode: g.home_team.team_tricode.clone(),
@@ -153,6 +157,7 @@ impl Game {
 
     fn from_schedule(g: &ScheduleGame) -> Self {
         Self {
+            sort_key: g.game_date_time_utc.clone(),
             game_status: g.game_status,
             game_status_text: g.game_status_text.trim().to_string(),
             home_tricode: g.home_team.team_tricode.clone().unwrap_or_default(),
@@ -281,7 +286,11 @@ fn games_for_date(schedule: &[ScheduleGameDate], date: NaiveDate) -> Vec<Game> {
     schedule
         .iter()
         .find(|gd| gd.game_date.starts_with(&date_str))
-        .map(|gd| gd.games.iter().map(Game::from_schedule).collect())
+        .map(|gd| {
+            let mut games: Vec<Game> = gd.games.iter().map(Game::from_schedule).collect();
+            games.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+            games
+        })
         .unwrap_or_default()
 }
 
@@ -486,9 +495,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if target_date == today && (cli.live || cli.date.is_none()) {
         match fetch_live_scores().await {
             Ok((date, games)) if !games.is_empty() => {
-                let label = format!("{date} (live)");
-                print_games(&label, &games);
-                return Ok(());
+                // Only use live scores if the scoreboard date is actually today
+                let live_date = NaiveDate::parse_from_str(&date, "%m/%d/%Y").ok();
+                if live_date == Some(today) {
+                    let label = format!("{date} (live)");
+                    print_games(&label, &games);
+                    return Ok(());
+                }
             }
             _ => {}
         }
